@@ -127,4 +127,245 @@ contract TestPointsHook is Test, Deployers, ERC1155TokenReceiver {
         );
         assertEq(pointsBalanceAfterSwap - pointsBalanceOriginal, 2 * 10 ** 14);
     }
+
+    function test_bonus_points_small_swap() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        bytes memory hookData = abi.encode(address(this));
+
+        // Small swap (0.05 ETH) - should get no bonus
+        swapRouter.swap{value: 0.05 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.05 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData
+        );
+
+        // Should get 20% of actual ETH spent
+        uint256 actualPoints = hook.balanceOf(address(this), poolIdUint);
+        assertGt(actualPoints, 0);
+        
+        // Check total points in leaderboard
+        assertEq(hook.getUserTotalPoints(poolIdUint, address(this)), actualPoints);
+        
+        // Check swap count
+        assertEq(hook.getUserSwapCount(poolIdUint, address(this)), 1);
+    }
+
+    function test_bonus_points_medium_swap() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        bytes memory hookData = abi.encode(address(this));
+
+        // Medium swap (0.15 ETH) - should get 50% bonus
+        swapRouter.swap{value: 0.15 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.15 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData
+        );
+
+        // Check that points were awarded
+        uint256 actualPoints = hook.balanceOf(address(this), poolIdUint);
+        assertGt(actualPoints, 0);
+        assertEq(hook.getUserTotalPoints(poolIdUint, address(this)), actualPoints);
+    }
+
+    function test_bonus_points_large_swap() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        bytes memory hookData = abi.encode(address(this));
+
+        // Large swap (1.5 ETH) - should get 100% bonus
+        swapRouter.swap{value: 1.5 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -1.5 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData
+        );
+
+        // Check that points were awarded
+        uint256 actualPoints = hook.balanceOf(address(this), poolIdUint);
+        assertGt(actualPoints, 0);
+        assertEq(hook.getUserTotalPoints(poolIdUint, address(this)), actualPoints);
+    }
+
+    function test_leaderboard_tracking() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        
+        // User 1 makes a swap
+        bytes memory hookData1 = abi.encode(address(1));
+        swapRouter.swap{value: 0.1 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.1 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData1
+        );
+
+        // User 2 makes a swap
+        bytes memory hookData2 = abi.encode(address(2));
+        swapRouter.swap{value: 0.2 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.2 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData2
+        );
+
+        // Check that both users are in the top users list
+        address[] memory topUsers = hook.getTopUsers(poolIdUint);
+        assertEq(topUsers.length, 2);
+        
+        // Check that both users have points
+        assertGt(hook.getUserTotalPoints(poolIdUint, address(1)), 0);
+        assertGt(hook.getUserTotalPoints(poolIdUint, address(2)), 0);
+        
+        // Check swap counts
+        assertEq(hook.getUserSwapCount(poolIdUint, address(1)), 1);
+        assertEq(hook.getUserSwapCount(poolIdUint, address(2)), 1);
+    }
+
+    function test_multiple_swaps_same_user() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        bytes memory hookData = abi.encode(address(this));
+
+        // First swap
+        swapRouter.swap{value: 0.1 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.1 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData
+        );
+
+        // Second swap
+        swapRouter.swap{value: 0.2 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.2 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData
+        );
+
+        // Check total points accumulated
+        uint256 totalPoints = hook.getUserTotalPoints(poolIdUint, address(this));
+        assertGt(totalPoints, 0);
+        
+        // Check swap count
+        assertEq(hook.getUserSwapCount(poolIdUint, address(this)), 2);
+        
+        // Check that user appears only once in top users
+        address[] memory topUsers = hook.getTopUsers(poolIdUint);
+        uint256 userCount = 0;
+        for (uint256 i = 0; i < topUsers.length; i++) {
+            if (topUsers[i] == address(this)) {
+                userCount++;
+            }
+        }
+        assertEq(userCount, 1); // Should appear only once
+    }
+
+    function test_no_points_without_hookdata() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        uint256 pointsBalanceOriginal = hook.balanceOf(
+            address(this),
+            poolIdUint
+        );
+
+        // Swap without hook data
+        swapRouter.swap{value: 0.1 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.1 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            "" // No hook data
+        );
+
+        // Should not get any points
+        uint256 pointsBalanceAfterSwap = hook.balanceOf(
+            address(this),
+            poolIdUint
+        );
+        assertEq(pointsBalanceAfterSwap, pointsBalanceOriginal);
+    }
+
+    function test_no_points_with_zero_address() public {
+        uint256 poolIdUint = uint256(PoolId.unwrap(key.toId()));
+        uint256 pointsBalanceOriginal = hook.balanceOf(
+            address(this),
+            poolIdUint
+        );
+
+        // Swap with zero address in hook data
+        bytes memory hookData = abi.encode(address(0));
+        swapRouter.swap{value: 0.1 ether}(
+            key,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -0.1 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            hookData
+        );
+
+        // Should not get any points
+        uint256 pointsBalanceAfterSwap = hook.balanceOf(
+            address(this),
+            poolIdUint
+        );
+        assertEq(pointsBalanceAfterSwap, pointsBalanceOriginal);
+    }
 }
